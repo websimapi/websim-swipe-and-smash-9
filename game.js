@@ -27,7 +27,7 @@ const POSITIVE_FEEDBACK_SOUNDS = [
 
 class Game {
     constructor() {
-        this.board = new Board(config.boardSize, config.candyTypes, this.onMatch.bind(this));
+        this.board = new Board(config.boardSize, config.candyTypes, this.onMatch.bind(this), this.getNewCandyType.bind(this));
         this.score = 0;
         this.scoreElement = document.getElementById('score');
         this.isProcessing = false;
@@ -61,6 +61,14 @@ class Game {
         this.updateScore(0);
         this.updateSmashUI();
         this.board.initialize();
+    }
+
+    getNewCandyType() {
+        const type = config.candyTypes[Math.floor(Math.random() * config.candyTypes.length)];
+        if (this.isRecordingStarted) {
+            recorder.recordAction({ type: 'newCandy', candyType: type });
+        }
+        return type;
     }
 
     startGame() {
@@ -333,7 +341,14 @@ class Game {
         const replayBoardElement = document.getElementById('replay-board');
         replayBoardElement.innerHTML = ''; // Clear previous replay
         
-        const replayBoard = new Board(config.boardSize, config.candyTypes, () => {});
+        const candyQueue = recording.actions.filter(a => a.type === 'newCandy').map(a => a.candyType);
+        const replayTypeGenerator = () => {
+            const nextType = candyQueue.shift();
+            // Fallback, though it shouldn't be needed with proper recording.
+            return nextType || config.candyTypes[0];
+        };
+
+        const replayBoard = new Board(config.boardSize, config.candyTypes, () => {}, replayTypeGenerator);
         replayBoard.boardElement = replayBoardElement;
         replayBoard.setupBoard();
         replayBoard.initialize(recording.initialState);
@@ -382,6 +397,8 @@ class Game {
                     playSound(action.name);
                 } else if (action.type === 'startBGM' && !this.replayBgmControl) {
                     this.replayBgmControl = await playBackgroundMusic(true); // Start BGM for replay
+                } else if (action.type === 'newCandy') {
+                    // This action is consumed by the replayTypeGenerator, no visual action needed here.
                 }
             }, delay);
             this.replayTimeouts.push(timeoutId);
@@ -433,15 +450,38 @@ class Game {
         }
         
         const replayBoardElement = document.getElementById('replay-board');
-        const replayBoard = new Board(config.boardSize, config.candyTypes, () => {});
-        replayBoard.boardElement = replayBoardElement;
         
         // This is a simplification; for perfect resume, we'd need to reconstruct board state
-        // But for now, just rescheduling future events is good enough.
+        // from scratch up to the pause point.
+        // For now, restarting the replay and fast-forwarding is not implemented, so we
+        // restart the whole replay visually when resuming. A better implementation would
+        // rebuild the exact board state at pauseTime.
+        
+        // Re-create the board and its type generator for the replay.
         const recording = recorder.getRecording();
+        const allNewCandyActions = recording.actions.filter(a => a.type === 'newCandy');
+        const actionsBeforePause = allNewCandyActions.filter(a => a.timestamp < this.replayState.pauseTime);
+        
+        let candyQueue = recording.actions.filter(a => a.type === 'newCandy' && a.timestamp >= this.replayState.pauseTime).map(a => a.candyType);
+
+        const replayTypeGenerator = () => {
+            const nextType = candyQueue.shift();
+            return nextType || config.candyTypes[0];
+        };
+
+        const replayBoard = new Board(config.boardSize, config.candyTypes, () => {}, replayTypeGenerator);
+        replayBoard.boardElement = replayBoardElement;
+        
+        // Re-initialize board to its starting state for re-simulation.
         replayBoard.initialize(recording.initialState);
-        // This is not perfect as it re-inits the board visually. A better impl would reconstruct state.
-        // For now, let's just replay from where we left off.
+
+        // This is the tricky part. To resume perfectly, we need to re-simulate all actions
+        // up to pauseTime instantly, without animations, to get the correct board state.
+        // This is complex. For now, we will just restart the visual replay but schedule
+        // only future actions. This will cause a visual jump but maintain logic.
+        // A full re-simulation is outside the scope of this fix.
+        // The current implementation will restart the visual from the beginning, but sounds and actions
+        // will resume from the correct time.
 
         this.scheduleReplayActions(replayBoard);
 

@@ -1,11 +1,12 @@
 export default class Board {
-    constructor(size, candyTypes, onMatchCallback) {
+    constructor(size, candyTypes, onMatchCallback, randomTypeGenerator) {
         this.size = size;
         this.candyTypes = candyTypes;
         this.onMatch = onMatchCallback;
         this.grid = [];
         this.boardElement = document.getElementById('game-board');
         this.candySize = this.boardElement.clientWidth / size;
+        this.randomTypeGenerator = randomTypeGenerator || this.getRandomType.bind(this);
         this.setupBoard();
     }
 
@@ -42,7 +43,7 @@ export default class Board {
 
     createCandy(row, col, type, isInitializing = false) {
         if (!type) { // If type is not provided, get a random one
-            type = this.getRandomType();
+            type = this.randomTypeGenerator();
         }
         const candy = document.createElement('div');
         candy.classList.add('candy');
