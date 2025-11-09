@@ -97,6 +97,56 @@ export default class Replay {
         this.scheduleActions(replayBoard);
     }
 
+    async rebuildAndSchedule(resumeFromTime = 0) {
+        const recording = recorder.getRecording();
+        if (!recording || !recording.initialState) return;
+
+        const replayBoardElement = document.getElementById('replay-board');
+        replayBoardElement.innerHTML = '';
+
+        const candyQueue = recording.actions.filter(a => a.type === 'newCandy').map(a => a.candyType);
+        const replayTypeGenerator = () => {
+            const nextType = candyQueue.shift();
+            return nextType || this.config.candyTypes[0];
+        };
+        
+        const replayBoard = new Board(this.config.boardSize, this.config.candyTypes, () => {}, replayTypeGenerator);
+        replayBoard.boardElement = replayBoardElement;
+        replayBoard.setupBoard();
+
+        replayBoard.createCandy = function(row, col, type, isInitializing = false) {
+            return Board.prototype.createCandy.call(this, row, col, type, isInitializing, true);
+        };
+        replayBoard.fillBoard = function() {
+            return Board.prototype.fillBoard.call(this, true);
+        };
+
+        replayBoard.initialize(recording.initialState);
+        this.state.currentReplayBoard = replayBoard;
+
+        // Fast-forward to the pause point without delays/animations
+        const pastActions = this.state.actions.filter(a => a.timestamp < resumeFromTime);
+        for (const action of pastActions) {
+            if (action.type === 'swap') {
+                const candy1 = replayBoard.grid[action.from.r][action.from.c];
+                const candy2 = replayBoard.grid[action.to.r][action.to.c];
+                if (candy1 && candy2) {
+                    await replayBoard.swapCandies(candy1, candy2);
+                    const isValid = await replayBoard.processMatches(false, [candy1, candy2]);
+                    if (!isValid) await replayBoard.swapCandies(candy1, candy2);
+                }
+            } else if (action.type === 'smash') {
+                const candiesToSmash = action.smashed
+                    .map(coords => (replayBoard.grid[coords.r] ? replayBoard.grid[coords.r][coords.c] : null))
+                    .filter(Boolean);
+                if (candiesToSmash.length > 0) await replayBoard.smashCandies(candiesToSmash);
+            }
+        }
+        
+        // Now, schedule the remaining actions with delays
+        this.scheduleActions(replayBoard, resumeFromTime);
+    }
+
     scheduleActions(replayBoard, resumeFromTime = 0) {
         this.replayTimeouts.forEach(clearTimeout);
         this.replayTimeouts = [];
@@ -183,7 +233,20 @@ export default class Replay {
             this.replayBgmControl.resume();
         }
 
-        this.scheduleActions(this.state.currentReplayBoard, this.state.pauseTime);
+        // Disable animations for fast-forward
+        const originalSetTimeout = window.setTimeout;
+        window.setTimeout = (func, delay) => {
+            if (delay === 300) { // Target board animation delays
+                func();
+                return -1; // Return a dummy ID
+            }
+            return originalSetTimeout(func, delay);
+        };
+        
+        this.rebuildAndSchedule(this.state.pauseTime).then(() => {
+            // Restore normal animations after rebuild
+            window.setTimeout = originalSetTimeout;
+        });
 
         const playPauseButton = document.getElementById('play-pause-button');
         playPauseButton.innerHTML = '&#10074;&#10074;'; // Pause icon

@@ -1,9 +1,7 @@
 import Board from './board.js';
 import InputHandler from './input.js';
 import Replay from './replay.js';
-import UI from './ui.js';
-import GameState from './state.js';
-import { playSound, pauseBackgroundMusic, resumeBackgroundMusic } from './audio.js';
+import { playSound, pauseBackgroundMusic, resumeBackgroundMusic, stopBackgroundMusic, playBackgroundMusic } from './audio.js';
 import * as recorder from './recorder.js';
 import confetti from 'confetti';
 
@@ -30,18 +28,34 @@ const POSITIVE_FEEDBACK_SOUNDS = [
 
 class Game {
     constructor() {
-        this.state = new GameState(config);
-        this.ui = new UI();
         this.board = new Board(config.boardSize, config.candyTypes, this.onMatch.bind(this), this.getNewCandyType.bind(this));
+        this.score = 0;
+        this.scoreElement = document.getElementById('score');
+        this.isProcessing = false;
+        this.isGameStarted = false;
+
+        this.comboCount = 0;
+        this.comboDisplay = document.getElementById('combo-display');
+        this.comboTimeout = null;
+
+        this.smashValue = config.initialSmashValue;
+        this.smashProgress = 0; // 0, 0.5
+        this.smashValueElement = document.getElementById('smash-value');
+        this.smashFluidElement = document.getElementById('smash-fluid');
+        this.timerValue = config.timerDuration;
+        this.timerElement = document.getElementById('timer');
+        this.timerInterval = null;
+        this.isTimerPaused = false;
         
+        // Replay logic is now in its own class
+        this.replay = new Replay(this, config);
         this.isRecordingStarted = false;
         
-        this.replay = new Replay(this, config);
         this.inputHandler = new InputHandler(this.board.boardElement, this.onSwap.bind(this), this.onSmash.bind(this));
         
-        this.ui.setup(this.startGame.bind(this));
-        this.ui.updateScore(this.state.score);
-        this.ui.updateSmash(this.state.smashValue, this.state.smashProgress);
+        this.setupUI();
+        this.updateScore(0);
+        this.updateSmashUI();
         this.initializeBoard();
     }
 
@@ -60,6 +74,8 @@ class Game {
     getNewCandyType(isInitial = false) {
         const type = config.candyTypes[Math.floor(Math.random() * config.candyTypes.length)];
         
+        // Only record new candies after the game has officially started
+        // and the initial board state has been recorded.
         if (!isInitial && this.isRecordingStarted) {
             recorder.recordAction({ type: 'newCandy', candyType: type });
         }
@@ -67,40 +83,56 @@ class Game {
     }
 
     startGame() {
-        if (this.state.isGameStarted) return;
-        this.state.startGame();
+        if (this.isGameStarted) return;
+        this.isGameStarted = true;
 
-        this.ui.hideStartOverlay();
+        document.getElementById('start-overlay').classList.add('hidden');
         
-        // This is a direct audio call, but it's a one-off for starting BGM.
-        // It's acceptable to keep it here for simplicity.
-        import('./audio.js').then(audio => audio.playBackgroundMusic());
-
+        playBackgroundMusic();
         recorder.startRecording(this.board.grid);
         this.isRecordingStarted = true;
 
         this.startTimer();
         this.inputHandler.enable();
     }
-    
+
+    setupUI() {
+        document.getElementById('start-button').addEventListener('click', () => this.startGame());
+    }
+
     startTimer() {
-        this.state.startTimer(
-            (time) => this.ui.updateTimer(time),
-            () => { // onEnd callback
-                recorder.resetRecording();
-                this.isRecordingStarted = false;
-                this.ui.updateSmash(this.state.smashValue, this.state.smashProgress);
+        this.timerInterval = setInterval(() => {
+            if (this.isTimerPaused) return;
+
+            this.timerValue--;
+            this.timerElement.textContent = this.timerValue;
+            if (this.timerValue <= 0) {
+                if (this.smashValue > 0) {
+                    this.smashValue--;
+                    this.updateSmashUI();
+                } else {
+                    // Game over / round over condition
+                    recorder.resetRecording();
+                    this.isRecordingStarted = false;
+                }
+                this.smashProgress = 0; // Reset progress if timer runs out
+                this.updateSmashUI();
+                this.resetTimer();
             }
-        );
-        this.ui.updateTimer(this.state.timerValue);
+        }, 1000);
+    }
+
+    resetTimer() {
+        this.timerValue = config.timerDuration;
+        this.timerElement.textContent = this.timerValue;
     }
 
     pauseTimer() {
-        this.state.pauseTimer();
+        this.isTimerPaused = true;
     }
 
     resumeTimer() {
-        this.state.resumeTimer();
+        this.isTimerPaused = false;
     }
 
     // Add BGM control methods for the replay module to call
@@ -112,23 +144,45 @@ class Game {
         resumeBackgroundMusic();
     }
 
+    updateComboUI() {
+        if (this.comboCount < 2) return;
+
+        this.comboDisplay.textContent = `Combo x${this.comboCount}`;
+        this.comboDisplay.classList.add('visible');
+
+        clearTimeout(this.comboTimeout);
+        this.comboTimeout = setTimeout(() => {
+            this.comboDisplay.classList.remove('visible');
+        }, 1500);
+    }
+
+    updateSmashUI() {
+        this.smashValueElement.textContent = this.smashValue;
+        const fillPercentage = this.smashProgress * 100; // 0 or 50
+        this.smashFluidElement.style.height = `${fillPercentage}%`;
+    }
+
+    updateScore(points) {
+        this.score += points;
+        this.scoreElement.textContent = this.score;
+    }
+
     onMatch(matchedCandies, isPlayerMove) {
         playSound('match.mp3');
         recorder.recordSound('match.mp3');
-        const newScore = this.state.addScore(matchedCandies.length * config.pointsPerCandy);
-        this.ui.updateScore(newScore);
+        this.updateScore(matchedCandies.length * config.pointsPerCandy);
         
-        const comboCount = this.state.incrementCombo();
-        this.ui.updateCombo(comboCount);
+        this.comboCount++;
+        this.updateComboUI();
 
         // Audio feedback
-        if (comboCount === 6) {
+        if (this.comboCount === 6) {
             playSound('combo_6.mp3');
             recorder.recordSound('combo_6.mp3');
-        } else if (comboCount === 7) {
+        } else if (this.comboCount === 7) {
             playSound('combo_7.mp3');
             recorder.recordSound('combo_7.mp3');
-        } else if (comboCount > 2) {
+        } else if (this.comboCount > 2) {
              playSound('crunch_combo.mp3');
              recorder.recordSound('crunch_combo.mp3');
         } else if (isPlayerMove) {
@@ -138,16 +192,29 @@ class Game {
         }
         
         if (isPlayerMove) {
-            const newProgress = this.state.processPlayerMove();
-            this.ui.updateTimer(this.state.timerValue); // Timer was reset
-            this.ui.updateSmash(this.state.smashValue, newProgress);
+            this.smashProgress += 0.5;
+            this.updateSmashUI();
 
-            if (newProgress >= 1) {
-                this.ui.animateSmashFill(() => {
-                    const newSmashValue = this.state.levelUpSmash();
-                    this.ui.updateSmash(newSmashValue, this.state.smashProgress);
-                });
+            if (this.smashProgress >= 1) {
+                // Animate fill, update value, then animate empty
+                this.smashFluidElement.style.transition = 'height 0.3s ease-in';
+                this.smashFluidElement.style.height = '100%';
+
+                setTimeout(() => {
+                    if (this.smashValue < 12) {
+                        this.smashValue++;
+                    }
+                    this.smashValueElement.textContent = this.smashValue;
+                    this.smashProgress = 0;
+                    
+                    setTimeout(() => {
+                        this.smashFluidElement.style.transition = 'height 0.5s ease-out';
+                        this.updateSmashUI();
+                    }, 200); // Wait a moment before draining
+                }, 300); // Duration of the fill animation
             }
+            
+            this.resetTimer();
         }
 
         if (matchedCandies.length >= 5) {
@@ -160,8 +227,8 @@ class Game {
     }
 
     async onSmash(candy) {
-        if (this.state.isProcessing || this.state.smashValue <= 0) return;
-        this.state.isProcessing = true;
+        if (this.isProcessing || this.smashValue <= 0) return;
+        this.isProcessing = true;
         this.pauseTimer();
 
         const r = parseInt(candy.dataset.row);
@@ -169,44 +236,60 @@ class Game {
         const candiesToSmash = new Set();
         let smashCost = 0;
 
-        if (this.state.smashValue >= 7) { // Simplified ranges
-            // 3x3 area
-            for (let i = r - 1; i <= r + 1; i++) for (let j = c - 1; j <= c + 1; j++) if (this.board.isValid(i, j) && this.board.grid[i][j]) candiesToSmash.add(this.board.grid[i][j]);
+        if (this.smashValue >= 7 && this.smashValue <= 12) {
+            // 3x3 area centered on the candy
+            for (let i = r - 1; i <= r + 1; i++) {
+                for (let j = c - 1; j <= c + 1; j++) {
+                    if (this.board.isValid(i, j) && this.board.grid[i][j]) {
+                        candiesToSmash.add(this.board.grid[i][j]);
+                    }
+                }
+            }
             smashCost = 3;
-        } else if (this.state.smashValue >= 4) {
-            // 2x2 area
-            for (let i = r; i <= r + 1; i++) for (let j = c; j <= c + 1; j++) if (this.board.isValid(i, j) && this.board.grid[i][j]) candiesToSmash.add(this.board.grid[i][j]);
+        } else if (this.smashValue >= 4 && this.smashValue <= 6) {
+            // 2x2 area starting from the candy (top-left)
+            for (let i = r; i <= r + 1; i++) {
+                for (let j = c; j <= c + 1; j++) {
+                    if (this.board.isValid(i, j) && this.board.grid[i][j]) {
+                        candiesToSmash.add(this.board.grid[i][j]);
+                    }
+                }
+            }
             smashCost = 2;
-        } else {
-            // 1x1
+        } else if (this.smashValue >= 1 && this.smashValue <= 3) {
             candiesToSmash.add(candy);
             smashCost = 1;
         }
-        
-        if (!this.state.useSmash(smashCost)) {
-            this.state.isProcessing = false;
+
+        if (this.smashValue < smashCost || smashCost === 0) {
+            this.isProcessing = false;
             this.resumeTimer();
             return;
         }
         
-        const smashedCoords = Array.from(candiesToSmash).map(c => ({ r: parseInt(c.dataset.row), c: parseInt(c.dataset.col) }));
+        const smashedCoords = Array.from(candiesToSmash).map(c => ({
+            r: parseInt(c.dataset.row),
+            c: parseInt(c.dataset.col)
+        }));
         if (this.isRecordingStarted) recorder.recordAction({ type: 'smash', smashed: smashedCoords });
 
-        this.ui.updateSmash(this.state.smashValue, this.state.smashProgress);
+        this.smashValue -= smashCost;
+        this.updateSmashUI();
         playSound('smash.mp3');
         recorder.recordSound('smash.mp3');
         
+        // Pass a flag to indicate this is a smash action
         await this.board.smashCandies(Array.from(candiesToSmash));
 
-        this.state.isProcessing = false;
+        this.isProcessing = false;
         this.resumeTimer();
     }
 
     async onSwap(candy1, candy2) {
-        if (this.state.isProcessing) return;
-        this.state.isProcessing = true;
+        if (this.isProcessing) return;
+        this.isProcessing = true;
         this.pauseTimer();
-        this.state.resetCombo();
+        this.comboCount = 0; // Reset combo on new player move
         
         const r1 = parseInt(candy1.dataset.row);
         const c1 = parseInt(candy1.dataset.col);
@@ -221,8 +304,9 @@ class Game {
             const rainbowCandy = candy1Powerup === 'rainbow' ? candy1 : candy2;
             const otherCandy = candy1Powerup === 'rainbow' ? candy2 : candy1;
             
+            // We don't need to swap visually, just activate
             await this.board.activateRainbowPowerup(rainbowCandy, otherCandy);
-            this.state.isProcessing = false;
+            this.isProcessing = false;
             this.resumeTimer();
             return;
         }
@@ -231,10 +315,11 @@ class Game {
         const isValidSwap = await this.board.processMatches(false, [candy1, candy2]);
 
         if (!isValidSwap) {
+            // If no matches, swap back
             await this.board.swapCandies(candy1, candy2);
         }
         
-        this.state.isProcessing = false;
+        this.isProcessing = false;
         this.resumeTimer();
     }
 }
