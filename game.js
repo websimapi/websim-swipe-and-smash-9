@@ -31,6 +31,7 @@ class Game {
         this.score = 0;
         this.scoreElement = document.getElementById('score');
         this.isProcessing = false;
+        this.isGameStarted = false;
 
         this.comboCount = 0;
         this.comboDisplay = document.getElementById('combo-display');
@@ -54,23 +55,30 @@ class Game {
             actions: [],
         };
         
-        this.inputHandler = new InputHandler(this.board.boardElement, this.onSwap.bind(this), this.onSmash.bind(this), this.onFirstInput.bind(this));
+        this.inputHandler = new InputHandler(this.board.boardElement, this.onSwap.bind(this), this.onSmash.bind(this));
         
         this.setupUI();
         this.updateScore(0);
         this.updateSmashUI();
-        this.startTimer();
         this.board.initialize();
     }
 
-    onFirstInput() {
-        if (!this.isRecordingStarted) {
-            recorder.startRecording(this.board.grid);
-            this.isRecordingStarted = true;
-        }
+    startGame() {
+        if (this.isGameStarted) return;
+        this.isGameStarted = true;
+
+        document.getElementById('start-overlay').classList.add('hidden');
+        
+        playBackgroundMusic();
+        recorder.startRecording(this.board.grid);
+        this.isRecordingStarted = true;
+
+        this.startTimer();
+        this.inputHandler.enable();
     }
 
     setupUI() {
+        document.getElementById('start-button').addEventListener('click', () => this.startGame());
         document.getElementById('clip-button').addEventListener('click', () => this.showReplay());
         document.getElementById('close-replay-button').addEventListener('click', () => this.hideReplay());
         document.getElementById('play-pause-button').addEventListener('click', () => this.toggleReplayPlayback());
@@ -289,7 +297,9 @@ class Game {
     showReplay() {
         this.pauseTimer();
         pauseBackgroundMusic();
-        recorder.pauseRecording();
+        if (this.isRecordingStarted) {
+            recorder.pauseRecording();
+        }
         const modal = document.getElementById('replay-modal');
         modal.classList.remove('hidden');
         this.playReplay();
@@ -298,9 +308,11 @@ class Game {
     hideReplay() {
         const modal = document.getElementById('replay-modal');
         modal.classList.add('hidden');
-        this.pauseReplay();
+        this.pauseReplay(); // Also stops bgm
+        if (this.isRecordingStarted) {
+            recorder.resumeRecording();
+        }
         resumeBackgroundMusic();
-        recorder.resumeRecording();
         this.resumeTimer();
     }
 
@@ -421,8 +433,6 @@ class Game {
         }
         
         const replayBoardElement = document.getElementById('replay-board');
-        replayBoardElement.innerHTML = ''; // Clear previous state to prevent duplicates
-
         const replayBoard = new Board(config.boardSize, config.candyTypes, () => {});
         replayBoard.boardElement = replayBoardElement;
         

@@ -1,41 +1,36 @@
 import { playBackgroundMusic } from './audio.js';
 
-let firstInputHandled = false;
-
-function handleFirstInput(onFirstInputCallback) {
-    if (!firstInputHandled) {
-        playBackgroundMusic();
-        if (onFirstInputCallback) {
-            onFirstInputCallback();
-        }
-        firstInputHandled = true;
-    }
-}
-
 export default class InputHandler {
-    constructor(boardElement, onSwap, onHold, onFirstInput) {
+    constructor(boardElement, onSwap, onHold) {
         this.boardElement = boardElement;
         this.onSwap = onSwap;
         this.onHold = onHold;
-        this.onFirstInput = onFirstInput;
         this.startCandy = null;
         this.isSwapping = false;
         this.startPos = { x: 0, y: 0 };
         this.holdTimeout = null;
         this.moved = false;
+        this.enabled = false;
 
         // Bind event handlers once to ensure they can be removed correctly
         this.boundHandlePointerDown = this.handlePointerDown.bind(this);
         this.boundHandlePointerMove = this.handlePointerMove.bind(this);
         this.boundHandlePointerUp = this.handlePointerUp.bind(this);
-        
-        // Listen on the container to catch events on candies properly
+    }
+
+    enable() {
+        if (this.enabled) return;
+        this.enabled = true;
         this.boardElement.parentElement.addEventListener('pointerdown', this.boundHandlePointerDown);
     }
 
-    handlePointerDown(e) {
-        handleFirstInput(this.onFirstInput);
+    disable() {
+        if (!this.enabled) return;
+        this.enabled = false;
+        this.boardElement.parentElement.removeEventListener('pointerdown', this.boundHandlePointerDown);
+    }
 
+    handlePointerDown(e) {
         if (this.isSwapping) return;
 
         const target = e.target;
