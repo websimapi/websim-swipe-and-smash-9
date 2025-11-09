@@ -107,12 +107,37 @@ export async function playBackgroundMusic(isReplay = false) {
     sourceNode.start(0);
 
     if (isReplay) {
+        let pausedAt = 0;
+        let startedAt = audioContext.currentTime;
+        let isPaused = false;
+        
         // For replays, return a controller to stop it later
         return {
             stop: () => {
                 sourceNode.stop();
                 sourceNode.disconnect();
                 gainNode.disconnect();
+            },
+            pause: () => {
+                if (isPaused) return;
+                isPaused = true;
+                pausedAt = audioContext.currentTime - startedAt;
+                sourceNode.stop();
+            },
+            resume: () => {
+                if (!isPaused) return;
+                isPaused = false;
+                
+                // Create a new source node to resume playback.
+                const newSourceNode = audioContext.createBufferSource();
+                newSourceNode.buffer = sourceNode.buffer;
+                newSourceNode.loop = sourceNode.loop;
+                newSourceNode.connect(gainNode);
+                newSourceNode.start(0, pausedAt % newSourceNode.buffer.duration);
+                
+                // update references
+                sourceNode = newSourceNode;
+                startedAt = audioContext.currentTime - pausedAt;
             }
         };
     } else {

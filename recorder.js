@@ -3,6 +3,7 @@ let initialState = null;
 let startTime = 0;
 
 export function startRecording(boardGrid) {
+    if (startTime > 0) return; // Already started
     recording = [];
     startTime = Date.now();
     // Deep copy of the initial candy types, not the elements
@@ -13,7 +14,14 @@ export function startRecording(boardGrid) {
     recordAction({ type: 'startBGM' });
 }
 
+export function resetRecording() {
+    recording = [];
+    initialState = null;
+    startTime = 0;
+}
+
 export function recordAction(action) {
+    if (startTime === 0) return; // Don't record if not started
     // action = { type: 'swap', from: {r,c}, to: {r,c} }
     // action = { type: 'smash', from: {r,c} }
     const timestamp = Date.now() - startTime;
