@@ -46,6 +46,7 @@ class Game {
         this.timerInterval = null;
         this.isTimerPaused = false;
         this.replayTimeouts = [];
+        this.replayBgmControl = null; // Add this line to track replay BGM
         this.isRecordingStarted = false;
         this.replayState = {
             isPlaying: false,
@@ -250,7 +251,11 @@ class Game {
             return;
         }
         
-        if (this.isRecordingStarted) recorder.recordAction({ type: 'smash', from: { r, c } });
+        const smashedCoords = Array.from(candiesToSmash).map(c => ({
+            r: parseInt(c.dataset.row),
+            c: parseInt(c.dataset.col)
+        }));
+        if (this.isRecordingStarted) recorder.recordAction({ type: 'smash', smashed: smashedCoords });
 
         this.smashValue -= smashCost;
         this.updateSmashUI();
@@ -316,7 +321,7 @@ class Game {
     hideReplay() {
         const modal = document.getElementById('replay-modal');
         modal.classList.add('hidden');
-        this.pauseReplay(); // Also stops bgm
+        this.stopReplay(); // Use stopReplay to properly clean up
         if (this.isRecordingStarted) {
             recorder.resumeRecording();
         }
@@ -326,11 +331,6 @@ class Game {
 
     async playReplay() {
         const playPauseButton = document.getElementById('play-pause-button');
-
-        if (this.replayState.isPaused) {
-            this.resumeReplay();
-            return;
-        }
 
         const recording = recorder.getRecording();
         if (!recording || !recording.initialState) return;
@@ -353,8 +353,6 @@ class Game {
         replayBoard.setupBoard();
         replayBoard.initialize(recording.initialState);
         
-        let replayBgmPlaying = false;
-
         this.replayState.isPlaying = true;
         this.replayState.isPaused = false;
         this.replayState.startTime = performance.now();
@@ -368,15 +366,28 @@ class Game {
     scheduleReplayActions(replayBoard) {
         this.replayTimeouts.forEach(clearTimeout);
         this.replayTimeouts = [];
-
+    
         const elapsedTime = this.replayState.isPaused ? this.replayState.pauseTime : 0;
-        this.replayState.startTime = performance.now() - elapsedTime;
-
-        this.replayState.actions.forEach(action => {
-            const delay = action.timestamp - elapsedTime;
-            if (delay < 0) return; // Action already happened
-
+        
+        const actionsToPlay = this.replayState.actions.filter(a => a.timestamp >= elapsedTime);
+        
+        let lastActionTimestamp = elapsedTime;
+    
+        const executeAndScheduleNext = async (index) => {
+            if (this.replayState.isPaused) return;
+            if (index >= actionsToPlay.length) {
+                const endTimeout = setTimeout(() => this.stopReplay(), 2000);
+                this.replayTimeouts.push(endTimeout);
+                return;
+            }
+    
+            const action = actionsToPlay[index];
+            const delay = action.timestamp - lastActionTimestamp;
+            lastActionTimestamp = action.timestamp;
+            
             const timeoutId = setTimeout(async () => {
+                if (this.replayState.isPaused) return;
+    
                 if (action.type === 'swap') {
                     const candy1 = replayBoard.grid[action.from.r][action.from.c];
                     const candy2 = replayBoard.grid[action.to.r][action.to.c];
@@ -388,30 +399,25 @@ class Game {
                         }
                     }
                 } else if (action.type === 'smash') {
-                    const candy = replayBoard.grid[action.from.r][action.from.c];
-                    if (candy) {
-                       const toSmash = [candy];
-                       await replayBoard.smashCandies(toSmash);
+                    const candiesToSmash = action.smashed
+                        .map(coords => (replayBoard.grid[coords.r] ? replayBoard.grid[coords.r][coords.c] : null))
+                        .filter(Boolean);
+                    if (candiesToSmash.length > 0) {
+                        await replayBoard.smashCandies(candiesToSmash);
                     }
                 } else if (action.type === 'sound') {
                     playSound(action.name);
                 } else if (action.type === 'startBGM' && !this.replayBgmControl) {
-                    this.replayBgmControl = await playBackgroundMusic(true); // Start BGM for replay
-                } else if (action.type === 'newCandy') {
-                    // This action is consumed by the replayTypeGenerator, no visual action needed here.
+                    this.replayBgmControl = await playBackgroundMusic(true);
                 }
+    
+                executeAndScheduleNext(index + 1);
             }, delay);
+    
             this.replayTimeouts.push(timeoutId);
-        });
-
-        const recordingDuration = this.replayState.actions.length > 0 ? this.replayState.actions[this.replayState.actions.length - 1].timestamp : 0;
-        const endTimeoutDelay = recordingDuration - elapsedTime + 2000;
-        if (endTimeoutDelay > 0) {
-            const endTimeout = setTimeout(() => {
-                this.stopReplay();
-            }, endTimeoutDelay);
-            this.replayTimeouts.push(endTimeout);
-        }
+        };
+    
+        executeAndScheduleNext(0);
     }
 
     toggleReplayPlayback() {
@@ -444,50 +450,12 @@ class Game {
         if (!this.replayState.isPaused) return;
         
         this.replayState.isPaused = false;
-        
-        if (this.replayBgmControl && this.replayBgmControl.resume) {
-            this.replayBgmControl.resume();
-        }
-        
-        const replayBoardElement = document.getElementById('replay-board');
-        
-        // This is a simplification; for perfect resume, we'd need to reconstruct board state
-        // from scratch up to the pause point.
-        // For now, restarting the replay and fast-forwarding is not implemented, so we
-        // restart the whole replay visually when resuming. A better implementation would
-        // rebuild the exact board state at pauseTime.
-        
-        // Re-create the board and its type generator for the replay.
-        const recording = recorder.getRecording();
-        const allNewCandyActions = recording.actions.filter(a => a.type === 'newCandy');
-        const actionsBeforePause = allNewCandyActions.filter(a => a.timestamp < this.replayState.pauseTime);
-        
-        let candyQueue = recording.actions.filter(a => a.type === 'newCandy' && a.timestamp >= this.replayState.pauseTime).map(a => a.candyType);
 
-        const replayTypeGenerator = () => {
-            const nextType = candyQueue.shift();
-            return nextType || config.candyTypes[0];
-        };
-
-        const replayBoard = new Board(config.boardSize, config.candyTypes, () => {}, replayTypeGenerator);
-        replayBoard.boardElement = replayBoardElement;
+        // Stop the current paused replay state completely
+        this.stopReplay();
         
-        // Re-initialize board to its starting state for re-simulation.
-        replayBoard.initialize(recording.initialState);
-
-        // This is the tricky part. To resume perfectly, we need to re-simulate all actions
-        // up to pauseTime instantly, without animations, to get the correct board state.
-        // This is complex. For now, we will just restart the visual replay but schedule
-        // only future actions. This will cause a visual jump but maintain logic.
-        // A full re-simulation is outside the scope of this fix.
-        // The current implementation will restart the visual from the beginning, but sounds and actions
-        // will resume from the correct time.
-
-        this.scheduleReplayActions(replayBoard);
-
-        const playPauseButton = document.getElementById('play-pause-button');
-        playPauseButton.innerHTML = '&#10074;&#10074;'; // Pause icon
-        playPauseButton.classList.add('playing');
+        // And start a new one from the beginning to ensure accuracy
+        this.playReplay();
     }
 
     stopReplay() {
