@@ -1,6 +1,10 @@
 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
 const audioBuffers = {};
 
+// Master gain
+const masterGainNode = audioContext.createGain();
+masterGainNode.connect(audioContext.destination);
+
 // Background music state
 let bgmSource = null;
 let bgmGainNode = null;
@@ -38,7 +42,7 @@ export function playSound(name) {
         if (!audioBuffer) return;
         const source = audioContext.createBufferSource();
         source.buffer = audioBuffer;
-        source.connect(audioContext.destination);
+        source.connect(masterGainNode);
         source.start(0);
     });
 }
@@ -89,7 +93,7 @@ export async function playBackgroundMusic() {
 
     bgmGainNode = audioContext.createGain();
     bgmGainNode.gain.value = 0;
-    bgmGainNode.connect(audioContext.destination);
+    bgmGainNode.connect(masterGainNode);
 
     bgmSource = audioContext.createBufferSource();
     bgmSource.buffer = audioBuffer;
@@ -100,6 +104,20 @@ export async function playBackgroundMusic() {
     bgmStartTime = audioContext.currentTime;
 
     updateBgmVolume();
+}
+
+export function muteGameAudio() {
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+    masterGainNode.gain.setValueAtTime(0, audioContext.currentTime);
+}
+
+export function unmuteGameAudio() {
+    if (audioContext.state === 'suspended') {
+        audioContext.resume();
+    }
+    masterGainNode.gain.setValueAtTime(1, audioContext.currentTime);
 }
 
 // Preload common sounds

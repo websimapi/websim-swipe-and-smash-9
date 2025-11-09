@@ -1,6 +1,6 @@
 import Board from './board.js';
 import InputHandler from './input.js';
-import { playSound } from './audio.js';
+import { playSound, muteGameAudio, unmuteGameAudio } from './audio.js';
 import * as recorder from './recorder.js';
 import confetti from 'confetti';
 
@@ -116,6 +116,7 @@ class Game {
 
     onMatch(matchedCandies, isPlayerMove) {
         playSound('match.mp3');
+        recorder.recordSound('match.mp3');
         this.updateScore(matchedCandies.length * config.pointsPerCandy);
         
         this.comboCount++;
@@ -124,13 +125,17 @@ class Game {
         // Audio feedback
         if (this.comboCount === 6) {
             playSound('combo_6.mp3');
+            recorder.recordSound('combo_6.mp3');
         } else if (this.comboCount === 7) {
             playSound('combo_7.mp3');
+            recorder.recordSound('combo_7.mp3');
         } else if (this.comboCount > 2) {
              playSound('crunch_combo.mp3');
+             recorder.recordSound('crunch_combo.mp3');
         } else if (isPlayerMove) {
             const randomSound = POSITIVE_FEEDBACK_SOUNDS[Math.floor(Math.random() * POSITIVE_FEEDBACK_SOUNDS.length)];
             playSound(randomSound);
+            recorder.recordSound(randomSound);
         }
         
         if (isPlayerMove) {
@@ -213,7 +218,8 @@ class Game {
 
         this.smashValue -= smashCost;
         this.updateSmashUI();
-        playSound('smash.js');
+        playSound('smash.mp3');
+        recorder.recordSound('smash.mp3');
         
         // Pass a flag to indicate this is a smash action
         await this.board.smashCandies(Array.from(candiesToSmash));
@@ -262,6 +268,7 @@ class Game {
 
     showReplay() {
         this.pauseTimer();
+        muteGameAudio();
         const modal = document.getElementById('replay-modal');
         modal.classList.remove('hidden');
         this.playReplay();
@@ -270,6 +277,7 @@ class Game {
     hideReplay() {
         const modal = document.getElementById('replay-modal');
         modal.classList.add('hidden');
+        unmuteGameAudio();
         const replayBoardElement = document.getElementById('replay-board');
         replayBoardElement.innerHTML = ''; // Clean up board
         if (this.replayTimeout) clearTimeout(this.replayTimeout);
@@ -318,6 +326,8 @@ class Game {
                        const toSmash = [candy];
                        await replayBoard.smashCandies(toSmash);
                     }
+                } else if (action.type === 'sound') {
+                    playSound(action.name);
                 }
                 currentActionIndex++;
                 playNextAction();

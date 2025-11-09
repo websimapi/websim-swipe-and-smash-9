@@ -18,7 +18,16 @@ export function recordAction(action) {
     recording.push({ ...action, timestamp });
 }
 
+export function recordSound(soundName) {
+    const timestamp = Date.now() - startTime;
+    recording.push({ type: 'sound', name: soundName, timestamp });
+}
+
 export function getRecording() {
+    if (recording) {
+        // Sort by timestamp to ensure actions and sounds are in order
+        recording.sort((a, b) => a.timestamp - b.timestamp);
+    }
     return {
         initialState: initialState,
         actions: recording
