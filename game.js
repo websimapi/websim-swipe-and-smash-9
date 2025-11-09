@@ -1,5 +1,6 @@
 import Board from './board.js';
 import InputHandler from './input.js';
+import Replay from './replay.js';
 import { playSound, pauseBackgroundMusic, resumeBackgroundMusic, stopBackgroundMusic, playBackgroundMusic } from './audio.js';
 import * as recorder from './recorder.js';
 import confetti from 'confetti';
@@ -45,16 +46,10 @@ class Game {
         this.timerElement = document.getElementById('timer');
         this.timerInterval = null;
         this.isTimerPaused = false;
-        this.replayTimeouts = [];
-        this.replayBgmControl = null; // Add this line to track replay BGM
+        
+        // Replay logic is now in its own class
+        this.replay = new Replay(this, config);
         this.isRecordingStarted = false;
-        this.replayState = {
-            isPlaying: false,
-            isPaused: false,
-            pauseTime: 0,
-            startTime: 0,
-            actions: [],
-        };
         
         this.inputHandler = new InputHandler(this.board.boardElement, this.onSwap.bind(this), this.onSmash.bind(this));
         
@@ -103,9 +98,6 @@ class Game {
 
     setupUI() {
         document.getElementById('start-button').addEventListener('click', () => this.startGame());
-        document.getElementById('clip-button').addEventListener('click', () => this.showReplay());
-        document.getElementById('close-replay-button').addEventListener('click', () => this.hideReplay());
-        document.getElementById('play-pause-button').addEventListener('click', () => this.toggleReplayPlayback());
     }
 
     startTimer() {
@@ -141,6 +133,15 @@ class Game {
 
     resumeTimer() {
         this.isTimerPaused = false;
+    }
+
+    // Add BGM control methods for the replay module to call
+    pauseMainBGM() {
+        pauseBackgroundMusic();
+    }
+
+    resumeMainBGM() {
+        resumeBackgroundMusic();
     }
 
     updateComboUI() {
@@ -320,189 +321,6 @@ class Game {
         
         this.isProcessing = false;
         this.resumeTimer();
-    }
-
-    showReplay() {
-        this.pauseTimer();
-        pauseBackgroundMusic();
-        if (this.isRecordingStarted) {
-            recorder.pauseRecording();
-        }
-        const modal = document.getElementById('replay-modal');
-        modal.classList.remove('hidden');
-        this.playReplay();
-    }
-
-    hideReplay() {
-        const modal = document.getElementById('replay-modal');
-        modal.classList.add('hidden');
-        this.stopReplay(); // Use stopReplay to properly clean up
-
-        // Force cleanup of any lingering replay candy elements
-        const lingeringCandies = document.querySelectorAll('.replay-candy');
-        lingeringCandies.forEach(candy => candy.remove());
-
-        if (this.isRecordingStarted) {
-            recorder.resumeRecording();
-        }
-        resumeBackgroundMusic();
-        this.resumeTimer();
-    }
-
-    async playReplay() {
-        const playPauseButton = document.getElementById('play-pause-button');
-
-        const recording = recorder.getRecording();
-        if (!recording || !recording.initialState) return;
-
-        this.replayTimeouts.forEach(clearTimeout);
-        this.replayTimeouts = [];
-
-        const replayBoardElement = document.getElementById('replay-board');
-        replayBoardElement.innerHTML = ''; // Clear previous replay
-        
-        const candyQueue = recording.actions.filter(a => a.type === 'newCandy').map(a => a.candyType);
-        const replayTypeGenerator = () => {
-            const nextType = candyQueue.shift();
-            // Fallback, though it shouldn't be needed with proper recording.
-            return nextType || config.candyTypes[0];
-        };
-
-        const replayBoard = new Board(config.boardSize, config.candyTypes, () => {}, replayTypeGenerator);
-        replayBoard.boardElement = replayBoardElement;
-        replayBoard.setupBoard();
-        
-        // Override functions for replay board to tag candies
-        replayBoard.createCandy = function(row, col, type, isInitializing = false) {
-            return Board.prototype.createCandy.call(this, row, col, type, isInitializing, true);
-        };
-        replayBoard.fillBoard = function() {
-            return Board.prototype.fillBoard.call(this, true);
-        };
-
-        replayBoard.initialize(recording.initialState);
-        
-        this.replayState.isPlaying = true;
-        this.replayState.isPaused = false;
-        this.replayState.startTime = performance.now();
-        this.replayState.actions = [...recording.actions];
-        this.replayState.currentReplayBoard = replayBoard; // Store for resume
-        playPauseButton.innerHTML = '&#10074;&#10074;'; // Pause icon
-        playPauseButton.classList.remove('playing');
-
-        this.scheduleReplayActions(replayBoard);
-    }
-
-    scheduleReplayActions(replayBoard, resumeFromTime = 0) {
-        this.replayTimeouts.forEach(clearTimeout);
-        this.replayTimeouts = [];
-
-        const replayStartTime = performance.now();
-
-        this.replayState.actions.forEach(action => {
-            if (action.timestamp < resumeFromTime) {
-                return; // Skip actions that have already passed
-            }
-            
-            const delay = action.timestamp - resumeFromTime;
-
-            const timeoutId = setTimeout(async () => {
-                if (this.replayState.isPaused) return;
-
-                if (action.type === 'swap') {
-                    const candy1 = replayBoard.grid[action.from.r][action.from.c];
-                    const candy2 = replayBoard.grid[action.to.r][action.to.c];
-                    if(candy1 && candy2) {
-                        await replayBoard.swapCandies(candy1, candy2);
-                        const isValid = await replayBoard.processMatches(false, [candy1, candy2]);
-                        if(!isValid) {
-                             await replayBoard.swapCandies(candy1, candy2);
-                        }
-                    }
-                } else if (action.type === 'smash') {
-                    const candiesToSmash = action.smashed
-                        .map(coords => (replayBoard.grid[coords.r] ? replayBoard.grid[coords.r][coords.c] : null))
-                        .filter(Boolean);
-                    if (candiesToSmash.length > 0) {
-                        await replayBoard.smashCandies(candiesToSmash);
-                    }
-                } else if (action.type === 'sound') {
-                    playSound(action.name);
-                } else if (action.type === 'startBGM' && !this.replayBgmControl) {
-                    this.replayBgmControl = await playBackgroundMusic(true);
-                }
-            }, delay);
-
-            this.replayTimeouts.push(timeoutId);
-        });
-
-        const recordingDuration = this.replayState.actions.length > 0 ? this.replayState.actions[this.replayState.actions.length - 1].timestamp : 0;
-        const endTimeout = setTimeout(() => {
-            if (!this.replayState.isPaused) {
-                this.stopReplay();
-            }
-        }, recordingDuration - resumeFromTime + 2000); // 2 seconds after last action
-        this.replayTimeouts.push(endTimeout);
-    }
-
-    toggleReplayPlayback() {
-        if (this.replayState.isPlaying) {
-            if (this.replayState.isPaused) {
-                this.resumeReplay();
-            } else {
-                this.pauseReplay();
-            }
-        }
-    }
-
-    pauseReplay() {
-        if (!this.replayState.isPlaying || this.replayState.isPaused) return;
-
-        this.replayTimeouts.forEach(clearTimeout);
-        this.replayTimeouts = [];
-        this.replayState.isPaused = true;
-        this.replayState.pauseTime = performance.now() - this.replayState.startTime;
-        if (this.replayBgmControl && this.replayBgmControl.pause) {
-            this.replayBgmControl.pause();
-        }
-        
-        const playPauseButton = document.getElementById('play-pause-button');
-        playPauseButton.innerHTML = '&#9658;'; // Play icon
-        playPauseButton.classList.remove('playing');
-    }
-    
-    resumeReplay() {
-        if (!this.replayState.isPaused) return;
-        
-        this.replayState.isPaused = false;
-        this.replayState.startTime = performance.now() - this.replayState.pauseTime;
-
-        if (this.replayBgmControl && this.replayBgmControl.resume) {
-            this.replayBgmControl.resume();
-        }
-
-        this.scheduleReplayActions(this.replayState.currentReplayBoard, this.replayState.pauseTime);
-
-        const playPauseButton = document.getElementById('play-pause-button');
-        playPauseButton.innerHTML = '&#10074;&#10074;'; // Pause icon
-        playPauseButton.classList.remove('playing');
-    }
-
-    stopReplay() {
-        this.replayTimeouts.forEach(clearTimeout);
-        this.replayTimeouts = [];
-        if (this.replayBgmControl) {
-            this.replayBgmControl.stop();
-            this.replayBgmControl = null;
-        }
-        this.replayState = { isPlaying: false, isPaused: false, pauseTime: 0, startTime: 0, actions: [] };
-        
-        const playPauseButton = document.getElementById('play-pause-button');
-        playPauseButton.innerHTML = '&#9658;'; // Play icon
-        playPauseButton.classList.remove('playing');
-        
-        // Optionally, close the modal automatically
-        // this.hideReplay();
     }
 }
 
