@@ -16,6 +16,7 @@ const BGM_CONFIG = {
     fadeOut: 15,
     maxVolume: 0.3
 };
+let isBgmPaused = false;
 
 async function loadSound(name) {
     if (audioBuffers[name]) {
@@ -105,6 +106,33 @@ export async function playBackgroundMusic() {
 
     updateBgmVolume();
 }
+
+export function stopBackgroundMusic() {
+    if (bgmSource) {
+        bgmSource.stop();
+        bgmSource.disconnect();
+        bgmSource = null;
+    }
+    if (bgmGainNode) {
+        // Don't disconnect from destination, just stop the source
+    }
+}
+
+
+export function pauseBackgroundMusic() {
+    if (bgmGainNode) {
+        isBgmPaused = true;
+        bgmGainNode.disconnect();
+    }
+}
+
+export function resumeBackgroundMusic() {
+    if (bgmGainNode && isBgmPaused) {
+        isBgmPaused = false;
+        bgmGainNode.connect(masterGainNode);
+    }
+}
+
 
 export function muteGameAudio() {
     if (audioContext.state === 'suspended') {

@@ -1,6 +1,6 @@
 import Board from './board.js';
 import InputHandler from './input.js';
-import { playSound, muteGameAudio, unmuteGameAudio } from './audio.js';
+import { playSound, pauseBackgroundMusic, resumeBackgroundMusic, playBackgroundMusic, stopBackgroundMusic } from './audio.js';
 import * as recorder from './recorder.js';
 import confetti from 'confetti';
 
@@ -268,7 +268,7 @@ class Game {
 
     showReplay() {
         this.pauseTimer();
-        muteGameAudio();
+        pauseBackgroundMusic();
         const modal = document.getElementById('replay-modal');
         modal.classList.remove('hidden');
         this.playReplay();
@@ -277,7 +277,8 @@ class Game {
     hideReplay() {
         const modal = document.getElementById('replay-modal');
         modal.classList.add('hidden');
-        unmuteGameAudio();
+        stopBackgroundMusic(); // Stop replay BGM
+        resumeBackgroundMusic(); // Resume game BGM
         const replayBoardElement = document.getElementById('replay-board');
         replayBoardElement.innerHTML = ''; // Clean up board
         if (this.replayTimeout) clearTimeout(this.replayTimeout);
@@ -285,6 +286,7 @@ class Game {
     }
 
     async playReplay() {
+        playBackgroundMusic(); // Start BGM for replay
         const recording = recorder.getRecording();
         if (!recording) return;
 
