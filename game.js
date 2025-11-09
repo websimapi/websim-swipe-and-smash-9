@@ -1,6 +1,6 @@
 import Board from './board.js';
 import InputHandler from './input.js';
-import { playSound, pauseBackgroundMusic, resumeBackgroundMusic, stopBackgroundMusic } from './audio.js';
+import { playSound, pauseBackgroundMusic, resumeBackgroundMusic, stopBackgroundMusic, playBackgroundMusic } from './audio.js';
 import * as recorder from './recorder.js';
 import confetti from 'confetti';
 
