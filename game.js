@@ -337,6 +337,11 @@ class Game {
         const modal = document.getElementById('replay-modal');
         modal.classList.add('hidden');
         this.stopReplay(); // Use stopReplay to properly clean up
+
+        // Force cleanup of any lingering replay candy elements
+        const lingeringCandies = document.querySelectorAll('.replay-candy');
+        lingeringCandies.forEach(candy => candy.remove());
+
         if (this.isRecordingStarted) {
             recorder.resumeRecording();
         }
@@ -366,6 +371,15 @@ class Game {
         const replayBoard = new Board(config.boardSize, config.candyTypes, () => {}, replayTypeGenerator);
         replayBoard.boardElement = replayBoardElement;
         replayBoard.setupBoard();
+        
+        // Override functions for replay board to tag candies
+        replayBoard.createCandy = function(row, col, type, isInitializing = false) {
+            return Board.prototype.createCandy.call(this, row, col, type, isInitializing, true);
+        };
+        replayBoard.fillBoard = function() {
+            return Board.prototype.fillBoard.call(this, true);
+        };
+
         replayBoard.initialize(recording.initialState);
         
         this.replayState.isPlaying = true;

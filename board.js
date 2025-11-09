@@ -26,7 +26,7 @@ export default class Board {
             this.grid[row] = [];
             for (let col = 0; col < this.size; col++) {
                 const type = initialState ? initialState[row][col] : this.getRandomType();
-                this.grid[row][col] = this.createCandy(row, col, type, true);
+                this.grid[row][col] = this.createCandy(row, col, type, true, false);
             }
         }
         // Ensure no matches on start unless it's a replay
@@ -41,12 +41,15 @@ export default class Board {
         return this.candyTypes[Math.floor(Math.random() * this.candyTypes.length)];
     }
 
-    createCandy(row, col, type, isInitializing = false) {
+    createCandy(row, col, type, isInitializing = false, isReplay = false) {
         if (!type) { // If type is not provided, get a random one
             type = this.randomTypeGenerator();
         }
         const candy = document.createElement('div');
         candy.classList.add('candy');
+        if (isReplay) {
+            candy.classList.add('replay-candy');
+        }
         candy.dataset.row = row;
         candy.dataset.col = col;
         candy.dataset.type = type;
@@ -350,11 +353,11 @@ export default class Board {
         return new Promise(resolve => setTimeout(resolve, 300));
     }
 
-    async fillBoard() {
+    async fillBoard(isReplay = false) {
         for (let r = 0; r < this.size; r++) {
             for (let c = 0; c < this.size; c++) {
                 if (!this.grid[r][c]) {
-                    this.grid[r][c] = this.createCandy(r, c);
+                    this.grid[r][c] = this.createCandy(r, c, undefined, false, isReplay);
                 }
             }
         }
