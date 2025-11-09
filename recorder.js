@@ -10,7 +10,7 @@ export function startRecording(boardGrid) {
         row.map(candy => candy ? candy.dataset.type : null)
     );
     // Record that BGM starts at the beginning
-    recordAction({ type: 'resumeBGM' });
+    recordAction({ type: 'startBGM' });
 }
 
 export function recordAction(action) {

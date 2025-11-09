@@ -1,6 +1,6 @@
 import Board from './board.js';
 import InputHandler from './input.js';
-import { playSound, muteGameAudio, unmuteGameAudio, playBackgroundMusic, stopBackgroundMusic } from './audio.js';
+import { playSound, pauseBackgroundMusic, resumeBackgroundMusic, stopBackgroundMusic } from './audio.js';
 import * as recorder from './recorder.js';
 import confetti from 'confetti';
 
@@ -233,7 +233,6 @@ class Game {
         if (this.isProcessing) return;
         this.isProcessing = true;
         this.pauseTimer();
-        recorder.recordAction({ type: 'pauseBGM' });
         this.comboCount = 0; // Reset combo on new player move
         
         const r1 = parseInt(candy1.dataset.row);
@@ -266,12 +265,11 @@ class Game {
         
         this.isProcessing = false;
         this.resumeTimer();
-        recorder.recordAction({ type: 'resumeBGM' });
     }
 
     showReplay() {
         this.pauseTimer();
-        muteGameAudio();
+        pauseBackgroundMusic();
         const modal = document.getElementById('replay-modal');
         modal.classList.remove('hidden');
         this.playReplay();
@@ -280,7 +278,7 @@ class Game {
     hideReplay() {
         const modal = document.getElementById('replay-modal');
         modal.classList.add('hidden');
-        unmuteGameAudio();
+        resumeBackgroundMusic();
         const replayBoardElement = document.getElementById('replay-board');
         replayBoardElement.innerHTML = ''; // Clean up board
         this.replayTimeouts.forEach(clearTimeout);
@@ -300,6 +298,8 @@ class Game {
         replayBoard.boardElement = replayBoardElement;
         replayBoard.setupBoard();
         replayBoard.initialize(recording.initialState);
+        
+        let replayBgmPlaying = false;
 
         // Schedule all actions based on their timestamp from the beginning
         recording.actions.forEach(action => {
@@ -322,10 +322,9 @@ class Game {
                     }
                 } else if (action.type === 'sound') {
                     playSound(action.name);
-                } else if (action.type === 'pauseBGM') {
-                    stopBackgroundMusic();
-                } else if (action.type === 'resumeBGM') {
-                    playBackgroundMusic();
+                } else if (action.type === 'startBGM' && !replayBgmPlaying) {
+                    replayBgmPlaying = true;
+                    this.replayBgmControl = await playBackgroundMusic(true); // Start BGM for replay
                 }
             }, action.timestamp);
             this.replayTimeouts.push(timeoutId);
@@ -333,10 +332,22 @@ class Game {
         
         const lastAction = recording.actions[recording.actions.length - 1];
         if (lastAction) {
-            const endTimeout = setTimeout(() => this.hideReplay(), lastAction.timestamp + 2000);
+            const endTimeout = setTimeout(() => {
+                if (this.replayBgmControl) {
+                    this.replayBgmControl.stop();
+                    this.replayBgmControl = null;
+                }
+                this.hideReplay();
+            }, lastAction.timestamp + 2000);
             this.replayTimeouts.push(endTimeout);
         } else {
-            const endTimeout = setTimeout(() => this.hideReplay(), 2000);
+            const endTimeout = setTimeout(() => {
+                if (this.replayBgmControl) {
+                    this.replayBgmControl.stop();
+                    this.replayBgmControl = null;
+                }
+                this.hideReplay();
+            }, 2000);
             this.replayTimeouts.push(endTimeout);
         }
     }
