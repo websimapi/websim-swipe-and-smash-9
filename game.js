@@ -1,6 +1,6 @@
 import Board from './board.js';
 import InputHandler from './input.js';
-import { playSound, pauseBackgroundMusic, resumeBackgroundMusic, playBackgroundMusic, stopBackgroundMusic } from './audio.js';
+import { playSound, muteGameAudio, unmuteGameAudio, playBackgroundMusic, stopBackgroundMusic } from './audio.js';
 import * as recorder from './recorder.js';
 import confetti from 'confetti';
 
@@ -44,6 +44,7 @@ class Game {
         this.timerElement = document.getElementById('timer');
         this.timerInterval = null;
         this.isTimerPaused = false;
+        this.replayTimeouts = [];
         
         this.inputHandler = new InputHandler(this.board.boardElement, this.onSwap.bind(this), this.onSmash.bind(this));
         
@@ -232,6 +233,7 @@ class Game {
         if (this.isProcessing) return;
         this.isProcessing = true;
         this.pauseTimer();
+        recorder.recordAction({ type: 'pauseBGM' });
         this.comboCount = 0; // Reset combo on new player move
         
         const r1 = parseInt(candy1.dataset.row);
@@ -264,11 +266,12 @@ class Game {
         
         this.isProcessing = false;
         this.resumeTimer();
+        recorder.recordAction({ type: 'resumeBGM' });
     }
 
     showReplay() {
         this.pauseTimer();
-        pauseBackgroundMusic();
+        muteGameAudio();
         const modal = document.getElementById('replay-modal');
         modal.classList.remove('hidden');
         this.playReplay();
@@ -277,16 +280,15 @@ class Game {
     hideReplay() {
         const modal = document.getElementById('replay-modal');
         modal.classList.add('hidden');
-        stopBackgroundMusic(); // Stop replay BGM
-        resumeBackgroundMusic(); // Resume game BGM
+        unmuteGameAudio();
         const replayBoardElement = document.getElementById('replay-board');
         replayBoardElement.innerHTML = ''; // Clean up board
-        if (this.replayTimeout) clearTimeout(this.replayTimeout);
+        this.replayTimeouts.forEach(clearTimeout);
+        this.replayTimeouts = [];
         this.resumeTimer();
     }
 
     async playReplay() {
-        playBackgroundMusic(); // Start BGM for replay
         const recording = recorder.getRecording();
         if (!recording) return;
 
@@ -299,18 +301,9 @@ class Game {
         replayBoard.setupBoard();
         replayBoard.initialize(recording.initialState);
 
-        let currentActionIndex = 0;
-        const playNextAction = async () => {
-            if (currentActionIndex >= recording.actions.length) {
-                // End of replay
-                this.replayTimeout = setTimeout(() => this.hideReplay(), 2000); // Auto-close
-                return;
-            }
-
-            const action = recording.actions[currentActionIndex];
-            const delay = (currentActionIndex > 0) ? (action.timestamp - recording.actions[currentActionIndex - 1].timestamp) : 500;
-            
-            this.replayTimeout = setTimeout(async () => {
+        // Schedule all actions based on their timestamp from the beginning
+        recording.actions.forEach(action => {
+            const timeoutId = setTimeout(async () => {
                 if (action.type === 'swap') {
                     const candy1 = replayBoard.grid[action.from.r][action.from.c];
                     const candy2 = replayBoard.grid[action.to.r][action.to.c];
@@ -324,19 +317,28 @@ class Game {
                 } else if (action.type === 'smash') {
                     const candy = replayBoard.grid[action.from.r][action.from.c];
                     if (candy) {
-                       // Simplified smash logic for replay visuals
                        const toSmash = [candy];
                        await replayBoard.smashCandies(toSmash);
                     }
                 } else if (action.type === 'sound') {
                     playSound(action.name);
+                } else if (action.type === 'pauseBGM') {
+                    stopBackgroundMusic();
+                } else if (action.type === 'resumeBGM') {
+                    playBackgroundMusic();
                 }
-                currentActionIndex++;
-                playNextAction();
-            }, Math.min(delay, 3000)); // Cap delay to 3s
-        };
-
-        playNextAction();
+            }, action.timestamp);
+            this.replayTimeouts.push(timeoutId);
+        });
+        
+        const lastAction = recording.actions[recording.actions.length - 1];
+        if (lastAction) {
+            const endTimeout = setTimeout(() => this.hideReplay(), lastAction.timestamp + 2000);
+            this.replayTimeouts.push(endTimeout);
+        } else {
+            const endTimeout = setTimeout(() => this.hideReplay(), 2000);
+            this.replayTimeouts.push(endTimeout);
+        }
     }
 }
 
