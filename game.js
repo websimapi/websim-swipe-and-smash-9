@@ -421,6 +421,8 @@ class Game {
         }
         
         const replayBoardElement = document.getElementById('replay-board');
+        replayBoardElement.innerHTML = ''; // Clear previous state to prevent duplicates
+
         const replayBoard = new Board(config.boardSize, config.candyTypes, () => {});
         replayBoard.boardElement = replayBoardElement;
         
