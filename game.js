@@ -61,12 +61,27 @@ class Game {
         this.setupUI();
         this.updateScore(0);
         this.updateSmashUI();
-        this.board.initialize();
+        this.initializeBoard();
     }
 
-    getNewCandyType() {
+    initializeBoard() {
+        // Pre-generate initial state so we can record it before the game starts
+        const initialState = [];
+        for (let r = 0; r < config.boardSize; r++) {
+            initialState[r] = [];
+            for (let c = 0; c < config.boardSize; c++) {
+                initialState[r][c] = this.getNewCandyType(true); // isInitial is true
+            }
+        }
+        this.board.initialize(initialState);
+    }
+
+    getNewCandyType(isInitial = false) {
         const type = config.candyTypes[Math.floor(Math.random() * config.candyTypes.length)];
-        if (this.isRecordingStarted) {
+        
+        // Only record new candies after the game has officially started
+        // and the initial board state has been recorded.
+        if (!isInitial && this.isRecordingStarted) {
             recorder.recordAction({ type: 'newCandy', candyType: type });
         }
         return type;
