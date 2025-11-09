@@ -372,37 +372,29 @@ class Game {
         this.replayState.isPaused = false;
         this.replayState.startTime = performance.now();
         this.replayState.actions = [...recording.actions];
+        this.replayState.currentReplayBoard = replayBoard; // Store for resume
         playPauseButton.innerHTML = '&#10074;&#10074;'; // Pause icon
         playPauseButton.classList.remove('playing');
 
         this.scheduleReplayActions(replayBoard);
     }
 
-    scheduleReplayActions(replayBoard) {
+    scheduleReplayActions(replayBoard, resumeFromTime = 0) {
         this.replayTimeouts.forEach(clearTimeout);
         this.replayTimeouts = [];
-    
-        const elapsedTime = this.replayState.isPaused ? this.replayState.pauseTime : 0;
-        
-        const actionsToPlay = this.replayState.actions.filter(a => a.timestamp >= elapsedTime);
-        
-        let lastActionTimestamp = elapsedTime;
-    
-        const executeAndScheduleNext = async (index) => {
-            if (this.replayState.isPaused) return;
-            if (index >= actionsToPlay.length) {
-                const endTimeout = setTimeout(() => this.stopReplay(), 2000);
-                this.replayTimeouts.push(endTimeout);
-                return;
+
+        const replayStartTime = performance.now();
+
+        this.replayState.actions.forEach(action => {
+            if (action.timestamp < resumeFromTime) {
+                return; // Skip actions that have already passed
             }
-    
-            const action = actionsToPlay[index];
-            const delay = action.timestamp - lastActionTimestamp;
-            lastActionTimestamp = action.timestamp;
             
+            const delay = action.timestamp - resumeFromTime;
+
             const timeoutId = setTimeout(async () => {
                 if (this.replayState.isPaused) return;
-    
+
                 if (action.type === 'swap') {
                     const candy1 = replayBoard.grid[action.from.r][action.from.c];
                     const candy2 = replayBoard.grid[action.to.r][action.to.c];
@@ -425,14 +417,18 @@ class Game {
                 } else if (action.type === 'startBGM' && !this.replayBgmControl) {
                     this.replayBgmControl = await playBackgroundMusic(true);
                 }
-    
-                executeAndScheduleNext(index + 1);
             }, delay);
-    
+
             this.replayTimeouts.push(timeoutId);
-        };
-    
-        executeAndScheduleNext(0);
+        });
+
+        const recordingDuration = this.replayState.actions.length > 0 ? this.replayState.actions[this.replayState.actions.length - 1].timestamp : 0;
+        const endTimeout = setTimeout(() => {
+            if (!this.replayState.isPaused) {
+                this.stopReplay();
+            }
+        }, recordingDuration - resumeFromTime + 2000); // 2 seconds after last action
+        this.replayTimeouts.push(endTimeout);
     }
 
     toggleReplayPlayback() {
@@ -465,12 +461,17 @@ class Game {
         if (!this.replayState.isPaused) return;
         
         this.replayState.isPaused = false;
+        this.replayState.startTime = performance.now() - this.replayState.pauseTime;
 
-        // Stop the current paused replay state completely
-        this.stopReplay();
-        
-        // And start a new one from the beginning to ensure accuracy
-        this.playReplay();
+        if (this.replayBgmControl && this.replayBgmControl.resume) {
+            this.replayBgmControl.resume();
+        }
+
+        this.scheduleReplayActions(this.replayState.currentReplayBoard, this.replayState.pauseTime);
+
+        const playPauseButton = document.getElementById('play-pause-button');
+        playPauseButton.innerHTML = '&#10074;&#10074;'; // Pause icon
+        playPauseButton.classList.remove('playing');
     }
 
     stopReplay() {
