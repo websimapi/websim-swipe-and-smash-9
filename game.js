@@ -289,6 +289,7 @@ class Game {
     showReplay() {
         this.pauseTimer();
         pauseBackgroundMusic();
+        recorder.pauseRecording();
         const modal = document.getElementById('replay-modal');
         modal.classList.remove('hidden');
         this.playReplay();
@@ -299,6 +300,7 @@ class Game {
         modal.classList.add('hidden');
         this.pauseReplay();
         resumeBackgroundMusic();
+        recorder.resumeRecording();
         this.resumeTimer();
     }
 
